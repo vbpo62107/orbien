@@ -1,860 +1,416 @@
 <script setup lang="ts">
-import {computed, onMounted, onUnmounted, ref, watch} from 'vue'
+import {computed} from 'vue'
 import {useRoute, useRouter} from 'vue-router'
 import AppIcon from '@/components/AppIcon.vue'
 import OsBadge from '@/components/OsBadge.vue'
-import PaginationBar from '@/components/PaginationBar.vue'
-import TrafficIO from '@/components/TrafficIO.vue'
-import {fetchClient, fetchProxies, kickClient} from '@/api'
-import {ApiError} from '@/api/errors'
-import type {ClientInfo, ProxyInfo} from '@/types/api'
+import SectionCard from '@/components/SectionCard.vue'
+import TrafficChart from '@/components/TrafficChart.vue'
+import TrafficSummary from '@/components/TrafficSummary.vue'
+import {kickClient} from '@/api'
+import {useDashboardStore} from '@/stores/dashboard'
 import {useLocale} from '@/composables/useLocale'
-import {formatProxyEndpoint, isHttpProxyType} from '@/utils/format'
+import {ref} from 'vue'
 
 const route = useRoute()
 const router = useRouter()
+const store = useDashboardStore()
 const {t} = useLocale()
-
-const runId = computed(() => String(route.params.runId || ''))
-
-const client = ref<ClientInfo | null>(null)
-const loading = ref(true)
-const notFound = ref(false)
 const kicking = ref(false)
 
-const proxies = ref<ProxyInfo[]>([])
-const proxiesLoading = ref(false)
-const proxySearch = ref('')
-const page = ref(1)
-const pageSize = ref(10)
-const total = ref(0)
-const ready = ref(false)
+const runId = computed(() => route.params.runId as string)
+const client = computed(() => store.clients.find(c => c.runId === runId.value))
+const isOnline = computed(() => !client.value?.status || client.value.status === 'online')
 
-let refreshTimer: number | null = null
-let searchDebounce: number | null = null
-let proxyReqSeq = 0
+const proxies = computed(() =>
+  store.proxies.filter(p => p.runId === runId.value)
+)
 
-function isOnline(raw?: string) {
-  return !raw || raw === 'online'
+const TYPE_COLORS: Record<string, string> = {
+  http:'#3b82f6', https:'#93c5fd', tcp:'#94a3b8',
+  udp:'#2dd4bf', socks5:'#f97316', file:'#fb7185', stcp:'#a78bfa', xtcp:'#f472b6',
 }
+function typeColor(type: string) { return TYPE_COLORS[(type||'tcp').toLowerCase()] ?? '#60a5fa' }
 
-function statusLabel(raw?: string) {
-  if (isOnline(raw)) return t('status.online')
-  if (raw === 'offline') return t('status.offline')
-  return raw || t('status.offline')
-}
-
-function formatSeen(secs: number, online: boolean) {
+function formatUptime(secs: number) {
   const n = Math.max(0, Math.floor(secs || 0))
-  if (online) {
-    if (n < 60) return t('clients.uptimeSecs', {n})
-    if (n < 3600) return t('clients.uptimeMins', {n: Math.floor(n / 60)})
-    if (n < 86400) return t('clients.uptimeHours', {n: Math.floor(n / 3600)})
-    return t('clients.uptimeDays', {n: Math.floor(n / 86400)})
-  }
-  if (n < 60) return t('clients.agoSecs', {n})
-  if (n < 3600) return t('clients.agoMins', {n: Math.floor(n / 60)})
-  if (n < 86400) return t('clients.agoHours', {n: Math.floor(n / 3600)})
-  return t('clients.agoDays', {n: Math.floor(n / 86400)})
-}
-
-function goBack() {
-  if (window.history.length > 1) router.back()
-  else router.push({name: 'clients'})
-}
-
-function openProxy(name: string) {
-  router.push({name: 'proxy-detail', params: {name}})
-}
-
-function onKeyOpenProxy(evt: KeyboardEvent, name: string) {
-  if (evt.key === 'Enter' || evt.key === ' ') {
-    evt.preventDefault()
-    openProxy(name)
-  }
-}
-
-async function loadClient() {
-  const id = runId.value
-  if (!id) {
-    loading.value = false
-    notFound.value = true
-    return false
-  }
-  try {
-    client.value = await fetchClient(id)
-    notFound.value = false
-    return true
-  } catch (e) {
-    if (e instanceof ApiError && e.code === 'http' && e.params?.status === 404) {
-      client.value = null
-      notFound.value = true
-      return false
-    }
-    // Soft-fail refresh: keep previous client if we already have one.
-    if (!client.value) notFound.value = true
-    return false
-  } finally {
-    loading.value = false
-  }
-}
-
-async function loadProxies() {
-  const id = client.value?.runId || runId.value
-  if (!id) return
-  const seq = ++proxyReqSeq
-  proxiesLoading.value = true
-  try {
-    const q = proxySearch.value.trim()
-    const data = await fetchProxies({
-      page: page.value,
-      pageSize: pageSize.value,
-      clientId: id,
-      q: q || undefined,
-    })
-    if (seq !== proxyReqSeq) return
-
-    const maxPage = Math.max(1, Math.ceil(data.total / Math.max(data.pageSize, 1)))
-    if (data.items.length === 0 && data.total > 0 && data.page > maxPage) {
-      page.value = maxPage
-      await loadProxies()
-      return
-    }
-
-    proxies.value = data.items ?? []
-    total.value = data.total
-    page.value = data.page
-    pageSize.value = data.pageSize
-  } catch {
-    if (seq !== proxyReqSeq) return
-  } finally {
-    if (seq === proxyReqSeq) proxiesLoading.value = false
-  }
-}
-
-async function refreshAll() {
-  const ok = await loadClient()
-  if (ok) await loadProxies()
+  if (n < 60) return `${n}s`
+  if (n < 3600) return `${Math.floor(n/60)}m ${n%60}s`
+  if (n < 86400) { const h=Math.floor(n/3600); return `${h}h ${Math.floor((n%3600)/60)}m` }
+  return `${Math.floor(n/86400)}d ${Math.floor((n%86400)/3600)}h`
 }
 
 async function onKick() {
-  const id = client.value?.runId
-  if (!id || kicking.value) return
+  if (kicking.value) return
   if (!window.confirm(t('clients.kickConfirm'))) return
   kicking.value = true
   try {
-    await kickClient(id)
-    await refreshAll()
+    await kickClient(runId.value)
+    await store.refresh()
+    router.push({name: 'clients'})
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    window.alert(t('clients.kickFailed', {msg}))
+    window.alert(t('clients.kickFailed', {msg: e instanceof Error ? e.message : String(e)}))
   } finally {
     kicking.value = false
   }
 }
-
-function clearSearchDebounce() {
-  if (searchDebounce !== null) {
-    window.clearTimeout(searchDebounce)
-    searchDebounce = null
-  }
-}
-
-watch(proxySearch, () => {
-  if (!ready.value) return
-  clearSearchDebounce()
-  proxyReqSeq++
-  proxiesLoading.value = false
-  page.value = 1
-  searchDebounce = window.setTimeout(() => {
-    searchDebounce = null
-    loadProxies()
-  }, 300)
-})
-
-watch([page, pageSize], () => {
-  if (!ready.value) return
-  if (searchDebounce !== null) return
-  loadProxies()
-})
-
-watch(runId, async () => {
-  if (!ready.value) return
-  loading.value = true
-  client.value = null
-  proxies.value = []
-  total.value = 0
-  page.value = 1
-  proxySearch.value = ''
-  await refreshAll()
-})
-
-onMounted(async () => {
-  await refreshAll()
-  ready.value = true
-  refreshTimer = window.setInterval(() => {
-    refreshAll()
-  }, 5000)
-})
-
-onUnmounted(() => {
-  clearSearchDebounce()
-  if (refreshTimer !== null) {
-    window.clearInterval(refreshTimer)
-    refreshTimer = null
-  }
-})
 </script>
 
 <template>
-  <div class="detail">
-    <nav class="breadcrumb" :aria-label="t('clients.detail')">
-      <button type="button" class="crumb-back" @click="goBack" :aria-label="t('clients.back')">
-        ←
+  <div v-if="!client" class="not-found">
+    <div class="not-found-inner">
+      <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+        <circle cx="32" cy="24" r="10"/>
+        <path d="M12 54c0-11.046 8.954-20 20-20s20 8.954 20 20"/>
+        <path d="M26 24h12M32 18v12" opacity="0.4"/>
+      </svg>
+      <p>{{ t('clients.notFound') }}</p>
+      <button class="back-btn" @click="router.push({name:'clients'})">← {{ t('common.back') }}</button>
+    </div>
+  </div>
+
+  <div v-else class="client-detail">
+    <!-- ── Hero header ── -->
+    <header class="detail-hero">
+      <button class="back-icon" :aria-label="t('common.back')" @click="router.back()">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 3L5 8l5 5"/></svg>
       </button>
-      <button type="button" class="crumb-link" @click="router.push({ name: 'clients' })">
-        {{ t('nav.clients') }}
-      </button>
-      <span class="crumb-sep" aria-hidden="true">/</span>
-      <span class="crumb-current mono">{{ client?.runId || runId }}</span>
-    </nav>
 
-    <div v-if="loading && !client" class="empty-card">{{ t('traffic.loading') }}</div>
+      <div class="hero-avatar" :class="{online: isOnline}">
+        <OsBadge :os="client.os" :arch="client.arch" icon-only/>
+        <span class="hero-dot" :class="{online: isOnline}"/>
+      </div>
 
-    <template v-else-if="client">
-      <section class="summary card">
-        <div class="summary-head">
-          <div class="head-left">
-            <div class="avatar" aria-hidden="true">
-              <OsBadge :os="client.os" :arch="client.arch" icon-only size="md"/>
-            </div>
-            <div class="head-body">
-              <div class="title-row">
-                <h2 class="name mono">{{ client.runId }}</h2>
-                <span v-if="client.version" class="tag version">v{{ client.version }}</span>
-                <span v-if="client.user" class="tag">{{ client.user }}</span>
-              </div>
-              <div class="meta">
-                <span v-if="client.clientIP" class="mono">{{ client.clientIP }}</span>
-                <OsBadge :os="client.os" :arch="client.arch" size="md" text-only/>
-              </div>
-            </div>
-          </div>
-          <div class="head-right">
-            <button
-                v-if="isOnline(client.status)"
-                type="button"
-                class="kick-btn"
-                :disabled="kicking"
-                :title="t('clients.kick')"
-                :aria-label="t('clients.kick')"
-                @click="onKick"
-            >
-              <AppIcon name="kick"/>
-            </button>
-            <span class="status-badge" :class="{ online: isOnline(client.status) }">
-              {{ statusLabel(client.status) }}
-            </span>
-          </div>
+      <div class="hero-info">
+        <div class="hero-title-row">
+          <h1 class="hero-id">{{ client.runId }}</h1>
+          <span class="status-pill" :class="{online: isOnline}">
+            <span class="pill-dot"/>
+            {{ isOnline ? t('status.online') : t('status.offline') }}
+          </span>
         </div>
-
-        <div class="info-row" role="list">
-          <div class="info-item" role="listitem">
-            <em>{{ t('clients.connections') }}</em>
-            <strong>{{ client.curConns ?? 0 }}</strong>
-          </div>
-          <div class="info-item" role="listitem">
-            <em>{{ t('clients.proxies') }}</em>
-            <strong>{{ client.proxyCount ?? 0 }}</strong>
-          </div>
-          <div class="info-item" role="listitem">
-            <em>{{ isOnline(client.status) ? t('clients.connected') : t('clients.disconnected') }}</em>
-            <strong>{{ formatSeen(client.connectedSecs, isOnline(client.status)) }}</strong>
-          </div>
-          <div v-if="client.hostname" class="info-item" role="listitem">
-            <em>{{ t('clients.hostname') }}</em>
-            <strong>{{ client.hostname }}</strong>
-          </div>
+        <div class="hero-meta">
+          <span v-if="client.hostname" class="meta-chip">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="2" y="3" width="12" height="9" rx="1.5"/><path d="M5 14h6M8 12v2"/></svg>
+            {{ client.hostname }}
+          </span>
+          <span v-if="client.user" class="meta-chip">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="5.5" r="3"/><path d="M2 13.5c0-3.314 2.686-6 6-6s6 2.686 6 6"/></svg>
+            {{ client.user }}
+          </span>
+          <span class="meta-chip">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="1" y="4" width="14" height="9" rx="1.5"/><path d="M4 4V2.5M12 4V2.5M1 8h14"/></svg>
+            <span class="mono">{{ client.clientIP || '—' }}</span>
+          </span>
+          <span v-if="client.version" class="meta-chip accent">v{{ client.version }}</span>
+          <OsBadge :os="client.os" :arch="client.arch" text-only/>
+          <span v-if="isOnline" class="meta-chip uptime">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 2.5"/></svg>
+            {{ formatUptime(client.connectedSecs) }}
+          </span>
         </div>
-      </section>
+      </div>
 
-      <section class="proxies-panel card">
-        <div class="proxies-header">
-          <div class="proxies-title">
-            <h3>{{ t('nav.proxies') }}</h3>
-            <span class="count">{{ total }}</span>
-          </div>
-          <label class="search">
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <circle cx="7" cy="7" r="4.5"/>
-              <path d="M10.5 10.5 14 14"/>
-            </svg>
-            <input
-                v-model="proxySearch"
-                type="search"
-                :placeholder="t('clients.searchProxies')"
-                autocomplete="off"
-            />
-          </label>
-        </div>
+      <div class="hero-actions">
+        <button
+          v-if="isOnline"
+          type="button" class="kick-btn"
+          :disabled="kicking"
+          @click="onKick"
+        >
+          <AppIcon name="kick"/>
+          {{ t('clients.kick') }}
+        </button>
+      </div>
+    </header>
 
-        <div v-if="proxiesLoading && !proxies.length" class="panel-empty">
-          {{ t('traffic.loading') }}
-        </div>
-        <div v-else-if="!proxies.length" class="panel-empty">
-          {{
-            proxySearch.trim()
-                ? t('clients.proxiesSearchEmpty', {q: proxySearch.trim()})
-                : t('clients.proxiesEmpty')
-          }}
-        </div>
-
-        <div v-else class="proxy-list">
-          <article
-              v-for="p in proxies"
-              :key="`${p.name}:${p.clientId}`"
-              class="proxy-card"
-              role="button"
-              tabindex="0"
-              @click="openProxy(p.name)"
-              @keydown="onKeyOpenProxy($event, p.name)"
-          >
-            <div class="proxy-main">
-              <div class="proxy-title">
-                <h3 class="proxy-name">{{ p.name }}</h3>
-                <span class="proxy-type">{{ (p.type || '—').toUpperCase() }}</span>
-              </div>
-              <div class="proxy-meta">
-                <span class="meta-endpoint">
-                  <em>{{ isHttpProxyType(p.type) ? t('proxies.domain') : t('proxies.port') }}</em>
-                  <code>{{ formatProxyEndpoint(p.type, p.remoteAddr) }}</code>
-                </span>
-                <span class="meta-arrow" aria-hidden="true">→</span>
-                <span class="meta-endpoint">
-                  <em>{{ t('proxies.localAddr') }}</em>
-                  <code>{{ p.localAddr || '—' }}</code>
-                </span>
-                <span>
-                  <em>{{ t('proxies.curConns') }}</em>
-                  {{ p.curConns ?? 0 }}
-                </span>
-                <span class="meta-client">
-                  <em>{{ t('proxies.client') }}</em>
-                  {{ p.clientId || '—' }}
-                </span>
-              </div>
-            </div>
-
-            <div class="proxy-side">
-              <TrafficIO :traffic-in="p.todayTrafficIn" :traffic-out="p.todayTrafficOut"/>
-              <span class="status-badge" :class="{ online: isOnline(p.status) }">
-                {{ statusLabel(p.status) }}
-              </span>
-            </div>
-          </article>
-        </div>
-
-        <PaginationBar
-            v-if="total > 0"
-            v-model:page="page"
-            v-model:page-size="pageSize"
-            :total="total"
+    <!-- ── Traffic summary ── -->
+    <div class="stat-row">
+      <SectionCard :title="t('traffic.network')">
+        <TrafficSummary
+          :traffic-in="client.totalTrafficIn ?? 0"
+          :traffic-out="client.totalTrafficOut ?? 0"
         />
-      </section>
-    </template>
+      </SectionCard>
 
-    <section v-else-if="notFound" class="not-found card">
-      <h2>{{ t('clients.notFound') }}</h2>
-      <p>{{ t('clients.notFoundDesc') }}</p>
-      <button type="button" class="back-btn" @click="router.push({ name: 'clients' })">
-        {{ t('clients.back') }}
-      </button>
-    </section>
+      <SectionCard :title="t('traffic.historyAll')">
+        <TrafficChart variant="line" range="24h" :run-id="runId" :refresh-ms="6000"/>
+      </SectionCard>
+    </div>
+
+    <!-- ── Proxy list ── -->
+    <SectionCard :title="t('nav.proxies')">
+      <template #extra>
+        <span class="proxy-count">{{ proxies.length }}</span>
+      </template>
+
+      <div v-if="!proxies.length" class="empty-state">
+        <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="8" y="14" width="32" height="22" rx="4"/><path d="M16 14V10M32 14V10M8 22h32"/></svg>
+        <p>{{ t('overview.emptyProxies') }}</p>
+      </div>
+
+      <div v-else class="proxy-grid">
+        <div
+          v-for="p in proxies" :key="p.name"
+          class="proxy-card"
+          @click="$router.push({name:'proxy-detail', params:{name:p.name}})"
+        >
+          <div class="proxy-card-top">
+            <span class="type-badge" :style="{color:typeColor(p.type), background:typeColor(p.type)+'1a', borderColor:typeColor(p.type)+'44'}">
+              {{ (p.type||'tcp').toUpperCase() }}
+            </span>
+            <span class="conn-badge">{{ p.curConns ?? 0 }} conn</span>
+          </div>
+          <div class="proxy-name">{{ p.name }}</div>
+          <div class="proxy-addr mono">{{ p.localAddr || '—' }}</div>
+        </div>
+      </div>
+    </SectionCard>
   </div>
 </template>
 
 <style scoped>
-.detail {
+.client-detail {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.1rem;
+  animation: page-in 0.35s ease both;
 }
 
-.breadcrumb {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.45rem;
-  font-size: 0.85rem;
-  color: var(--muted);
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-.crumb-back,
-.crumb-link {
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  cursor: pointer;
-  padding: 0;
-}
-
-.crumb-back:hover,
-.crumb-link:hover {
-  color: var(--accent-text);
-}
-
-.crumb-sep {
-  opacity: 0.55;
-}
-
-.crumb-current {
-  color: var(--text);
-  font-weight: 600;
-}
-
-.mono {
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-}
-
-.summary,
-.proxies-panel,
-.not-found,
-.empty-card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  box-shadow: var(--shadow);
-}
-
-.summary {
-  display: flex;
-  flex-direction: column;
-  gap: 1.4rem;
-  padding: 1.15rem 1.25rem 1.3rem;
-  overflow: hidden;
-}
-
-.summary-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0;
-}
-
-.head-left {
-  display: flex;
-  align-items: center;
-  gap: 0.9rem;
-  min-width: 0;
-}
-
-.avatar {
-  width: 2.75rem;
-  height: 2.75rem;
-  border-radius: 12px;
+/* not found */
+.not-found {
   display: grid;
   place-items: center;
-  flex-shrink: 0;
-  background: color-mix(in srgb, var(--muted) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--muted) 14%, transparent);
+  min-height: 20rem;
 }
-
-.avatar :deep(.os-icon) {
-  width: 1.45rem;
-  height: 1.45rem;
+.not-found-inner {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 1rem; color: var(--muted);
 }
+.not-found-inner svg { width: 4rem; height: 4rem; opacity: 0.4; }
+.not-found-inner p { margin: 0; font-size: 0.9rem; }
+.back-btn {
+  padding: 0.4rem 1rem; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--panel);
+  color: var(--text); font: inherit; font-size: 0.85rem;
+  cursor: pointer; transition: background 0.15s;
+}
+.back-btn:hover { background: var(--panel-hover); }
 
-.head-body {
-  min-width: 0;
+/* hero */
+.detail-hero {
   display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.title-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.45rem;
-}
-
-.name {
-  margin: 0;
-  font-size: 1.15rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.25;
-  word-break: break-all;
-}
-
-.tag {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.12rem 0.5rem;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--muted) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--muted) 14%, transparent);
-}
-
-.tag.version {
-  color: var(--status-ok);
-  background: var(--status-ok-soft);
-  border-color: color-mix(in srgb, var(--status-ok) 22%, transparent);
-}
-
-.meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.65rem 1rem;
-  font-size: 0.82rem;
-  color: var(--muted);
-}
-
-.head-right {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  flex-shrink: 0;
-}
-
-.kick-btn {
-  box-sizing: border-box;
-  width: 1.85rem;
-  height: 1.85rem;
-  padding: 0;
-  border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 45%, transparent);
-  background: transparent;
-  color: var(--danger, #ef4444);
-  display: inline-grid;
-  place-items: center;
-  cursor: pointer;
-  font-size: 1rem;
-}
-
-.kick-btn:hover:not(:disabled) {
-  border-color: var(--danger, #ef4444);
-}
-
-.kick-btn:disabled {
-  opacity: 0.45;
-  cursor: wait;
-}
-
-.info-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.85rem 1.75rem;
-  padding: 0;
-}
-
-.info-item {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  min-width: 0;
-  font-size: 0.82rem;
-}
-
-.info-item em {
-  font-style: normal;
-  color: var(--muted);
-}
-
-.info-item em::after {
-  content: ':';
-}
-
-.info-item strong {
-  font-weight: 650;
-  color: var(--text);
-  word-break: break-all;
-}
-
-.proxies-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: 0;
-  overflow: hidden;
-}
-
-.proxies-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.95rem 1.15rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.proxies-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.proxies-title h3 {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 650;
-}
-
-.count {
-  min-width: 1.35rem;
-  padding: 0.1rem 0.45rem;
-  border-radius: 8px;
-  text-align: center;
-  font-size: 0.72rem;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--muted) 12%, transparent);
-}
-
-.search {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: min(100%, 14rem);
-  padding: 0.35rem 0.7rem;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--muted) 6%, transparent);
-}
-
-.search svg {
-  width: 0.95rem;
-  height: 0.95rem;
-  fill: none;
-  stroke: var(--muted);
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  flex-shrink: 0;
-}
-
-.search input {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  outline: none;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 0.82rem;
-}
-
-.search input::placeholder {
-  color: var(--muted);
-}
-
-.panel-empty,
-.empty-card {
-  padding: 2.25rem 1rem;
-  text-align: center;
-  color: var(--muted);
-}
-
-.proxy-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  padding: 0.9rem 1rem;
-}
-
-.proxy-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1.25rem;
-  padding: 1rem 1.2rem;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.25rem 1.4rem;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 16px;
   box-shadow: var(--shadow);
-  cursor: pointer;
-  transition: border-color 0.18s ease,
-  box-shadow 0.18s ease,
-  transform 0.18s ease;
+  position: relative;
 }
 
-.proxy-card:hover {
-  border-color: var(--line-strong);
-  box-shadow: 0 6px 18px color-mix(in srgb, var(--text) 6%, transparent);
-}
-
-.proxy-card:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
-  outline-offset: 2px;
-}
-
-.proxy-main {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-}
-
-.proxy-title {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-}
-
-.proxy-name {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--text);
-  letter-spacing: -0.01em;
-}
-
-.proxy-type {
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+.back-icon {
+  width: 2rem; height: 2rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: transparent;
   color: var(--muted);
+  display: grid; place-items: center;
+  cursor: pointer; flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+  margin-top: 0.15rem;
 }
+.back-icon:hover { background: var(--panel-hover); color: var(--text); }
+.back-icon svg { width: 1rem; height: 1rem; }
 
-.proxy-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.35rem 1.15rem;
-  font-size: 0.8rem;
-  color: var(--text);
-}
-
-.proxy-meta em {
-  font-style: normal;
-  color: var(--muted);
-  margin-right: 0.3rem;
-  font-weight: 500;
-}
-
-.meta-endpoint {
-  display: inline-flex;
-  align-items: baseline;
-  min-width: 0;
-}
-
-.meta-endpoint code {
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--text);
-  word-break: break-all;
-}
-
-.meta-arrow {
-  color: var(--muted);
-  font-size: 0.85rem;
-  font-weight: 600;
-  margin: 0 -0.55rem;
-  user-select: none;
-}
-
-.meta-client {
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 0.76rem;
-  word-break: break-all;
-}
-
-.proxy-side {
-  display: flex;
-  align-items: center;
-  gap: 1.1rem;
+.hero-avatar {
+  position: relative;
+  width: 3.2rem; height: 3.2rem;
+  border-radius: 14px;
+  display: grid; place-items: center;
   flex-shrink: 0;
+  background: color-mix(in srgb, var(--muted) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--muted) 15%, transparent);
+  transition: background 0.2s;
+}
+.hero-avatar.online {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  min-width: 3.6rem;
-  justify-content: center;
-  padding: 0.28rem 0.75rem;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 650;
+.hero-dot {
+  position: absolute;
+  right: -0.2rem; bottom: -0.2rem;
+  width: 0.65rem; height: 0.65rem;
+  border-radius: 50%;
+  background: var(--muted);
+  border: 2.5px solid var(--panel);
+  box-sizing: content-box;
+}
+.hero-dot.online {
+  background: var(--status-ok);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-ok) 20%, transparent); }
+  50%      { box-shadow: 0 0 0 5px color-mix(in srgb, var(--status-ok) 7%, transparent); }
+}
+
+.hero-info { flex: 1; min-width: 0; }
+
+.hero-title-row {
+  display: flex; align-items: center; gap: 0.65rem;
+  flex-wrap: wrap; margin-bottom: 0.55rem;
+}
+
+.hero-id {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.status-pill {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px; font-size: 0.73rem; font-weight: 650;
   color: var(--muted);
   background: color-mix(in srgb, var(--muted) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--muted) 18%, transparent);
 }
-
-.status-badge.online {
+.status-pill.online {
   color: var(--status-ok);
   background: var(--status-ok-soft);
-  border-color: color-mix(in srgb, var(--status-ok) 22%, transparent);
+  border-color: color-mix(in srgb, var(--status-ok) 25%, transparent);
+}
+.pill-dot {
+  width: 0.34rem; height: 0.34rem;
+  border-radius: 50%; background: currentColor; flex-shrink: 0;
 }
 
-.proxies-panel :deep(.pagination-bar) {
-  padding: 0 1rem 0.9rem;
-  border-top: 0;
+.hero-meta {
+  display: flex; flex-wrap: wrap; gap: 0.4rem 0.6rem;
+  align-items: center;
 }
 
-.not-found {
-  padding: 2.5rem 1.25rem;
-  text-align: center;
-}
-
-.not-found h2 {
-  margin: 0 0 0.45rem;
-  font-size: 1.1rem;
-}
-
-.not-found p {
-  margin: 0 0 1.1rem;
+.meta-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: 8px;
+  font-size: 0.76rem; font-weight: 500;
   color: var(--muted);
-  font-size: 0.88rem;
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--muted) 14%, transparent);
 }
+.meta-chip svg { width: 0.78rem; height: 0.78rem; opacity: 0.75; flex-shrink: 0; }
+.meta-chip.accent { color: var(--accent-text); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 22%, transparent); }
+.meta-chip.uptime { color: var(--status-ok); background: var(--status-ok-soft); border-color: color-mix(in srgb, var(--status-ok) 22%, transparent); }
+.mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 0.75rem; }
 
-.back-btn {
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  background: var(--accent-soft);
-  color: var(--accent-text);
-  font: inherit;
-  font-size: 0.85rem;
-  font-weight: 650;
-  padding: 0.45rem 0.95rem;
+.hero-actions { flex-shrink: 0; }
+
+.kick-btn {
+  display: inline-flex; align-items: center; gap: 0.45rem;
+  padding: 0.48rem 1rem;
   border-radius: 10px;
+  border: 1px solid var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font: inherit; font-size: 0.82rem; font-weight: 600;
   cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.kick-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  border-color: var(--danger);
+}
+.kick-btn:disabled { opacity: 0.4; cursor: wait; }
+
+/* stat row */
+.stat-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 1rem;
+  align-items: stretch;
 }
 
-.back-btn:hover {
-  border-color: var(--accent);
+/* proxy grid */
+.proxy-count {
+  font-size: 0.75rem; font-weight: 700;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  padding: 0.12rem 0.48rem; border-radius: 999px;
+  font-variant-numeric: tabular-nums;
 }
 
-@media (max-width: 560px) {
-  .meta-arrow {
-    display: none;
-  }
+.empty-state {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 0.75rem; padding: 2.5rem 1rem; color: var(--muted);
+}
+.empty-state svg { width: 2.5rem; height: 2.5rem; opacity: 0.4; }
+.empty-state p { margin: 0; font-size: 0.88rem; }
+
+.proxy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.65rem;
 }
 
-@media (max-width: 720px) {
-  .summary-head {
-    flex-direction: column;
-  }
+.proxy-card {
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--muted) 4%, transparent);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.12s;
+  display: flex; flex-direction: column; gap: 0.38rem;
+}
+.proxy-card:hover {
+  background: var(--panel-hover);
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
 
-  .head-right {
-    align-self: flex-end;
-  }
+.proxy-card-top {
+  display: flex; align-items: center; justify-content: space-between;
+}
 
-  .proxy-card {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.85rem;
-  }
+.type-badge {
+  display: inline-flex; align-items: center;
+  padding: 0.1rem 0.45rem;
+  border-radius: 6px; font-size: 0.66rem; font-weight: 700;
+  border: 1px solid; letter-spacing: 0.04em;
+}
 
-  .proxy-side {
-    justify-content: space-between;
-  }
+.conn-badge {
+  font-size: 0.68rem; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.proxy-name {
+  font-weight: 600;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 0.82rem; color: var(--text);
+  word-break: break-all;
+}
+
+.proxy-addr {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 0.74rem; color: var(--muted);
+}
+
+@media (max-width: 860px) {
+  .detail-hero { flex-wrap: wrap; }
+  .hero-actions { width: 100%; }
+  .stat-row { grid-template-columns: 1fr; }
 }
 </style>

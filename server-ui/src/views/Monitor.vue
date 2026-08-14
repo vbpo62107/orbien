@@ -72,88 +72,23 @@ interface ConfigField {
   value: string | number | boolean | null
 }
 
-/** Compact server config — hide unset optional ports / empty host. */
 const configFields = computed<ConfigField[]>(() => {
   const c = cfg.value
   if (!c) return []
-
   const fields: ConfigField[] = [
-    {
-      key: 'listen',
-      label: t('monitor.bindAddr'),
-      type: 'raw',
-      value: `${c.bindAddr || '—'}:${c.bindPort ?? '—'}`,
-    },
+    {key: 'listen', label: t('monitor.bindAddr'), type: 'raw', value: `${c.bindAddr || '—'}:${c.bindPort ?? '—'}`},
   ]
-
-  if (!isUnsetPort(c.kcpBindPort)) {
-    fields.push({
-      key: 'kcp',
-      label: t('monitor.kcpBindPort'),
-      type: 'port',
-      value: c.kcpBindPort,
-    })
-  }
-  if (!isUnsetPort(c.quicBindPort)) {
-    fields.push({
-      key: 'quic',
-      label: t('monitor.quicBindPort'),
-      type: 'port',
-      value: c.quicBindPort,
-    })
-  }
-  if (!isUnsetPort(c.vhostHTTPPort)) {
-    fields.push({
-      key: 'http',
-      label: t('monitor.vhostHTTPPort'),
-      type: 'port',
-      value: c.vhostHTTPPort,
-    })
-  }
-  if (!isUnsetPort(c.vhostHTTPSPort)) {
-    fields.push({
-      key: 'https',
-      label: t('monitor.vhostHTTPSPort'),
-      type: 'port',
-      value: c.vhostHTTPSPort,
-    })
-  }
-  if (!isUnsetText(c.subDomainHost ?? '')) {
-    fields.push({
-      key: 'subdomain',
-      label: t('monitor.subDomainHost'),
-      type: 'text',
-      value: c.subDomainHost,
-    })
-  }
-
+  if (!isUnsetPort(c.kcpBindPort)) fields.push({key: 'kcp', label: t('monitor.kcpBindPort'), type: 'port', value: c.kcpBindPort})
+  if (!isUnsetPort(c.quicBindPort)) fields.push({key: 'quic', label: t('monitor.quicBindPort'), type: 'port', value: c.quicBindPort})
+  if (!isUnsetPort(c.vhostHTTPPort)) fields.push({key: 'http', label: t('monitor.vhostHTTPPort'), type: 'port', value: c.vhostHTTPPort})
+  if (!isUnsetPort(c.vhostHTTPSPort)) fields.push({key: 'https', label: t('monitor.vhostHTTPSPort'), type: 'port', value: c.vhostHTTPSPort})
+  if (!isUnsetText(c.subDomainHost ?? '')) fields.push({key: 'subdomain', label: t('monitor.subDomainHost'), type: 'text', value: c.subDomainHost})
   fields.push(
-      {
-        key: 'mux',
-        label: t('monitor.tcpMux'),
-        type: 'bool',
-        value: c.tcpMux,
-      },
-      {
-        key: 'tls',
-        label: t('monitor.tlsForce'),
-        type: 'bool',
-        value: c.tlsForce,
-      },
-      {
-        key: 'pool',
-        label: t('monitor.metricMaxPool'),
-        type: 'raw',
-        value: c.maxPoolCount ?? 0,
-      },
-      {
-        key: 'heartbeat',
-        label: t('monitor.metricHeartbeat'),
-        type: 'raw',
-        value: formatHeartbeat(c.heartbeatTimeout),
-      },
+    {key: 'mux', label: t('monitor.tcpMux'), type: 'bool', value: c.tcpMux},
+    {key: 'tls', label: t('monitor.tlsForce'), type: 'bool', value: c.tlsForce},
+    {key: 'pool', label: t('monitor.metricMaxPool'), type: 'raw', value: c.maxPoolCount ?? 0},
+    {key: 'heartbeat', label: t('monitor.metricHeartbeat'), type: 'raw', value: formatHeartbeat(c.heartbeatTimeout)},
   )
-
   return fields
 })
 
@@ -164,7 +99,8 @@ const descItems = computed<DescItem[]>(() =>
 
 <template>
   <div class="monitor">
-    <section class="grid stats">
+    <!-- ── KPI row ── -->
+    <section class="kpi-grid" aria-label="Overview metrics">
       <StatCard :label="t('overview.totalClients')" icon="users" tone="blue">
         {{ totalClients }}
       </StatCard>
@@ -179,70 +115,46 @@ const descItems = computed<DescItem[]>(() =>
       </StatCard>
     </section>
 
-    <div class="monitor-panels">
-      <SectionCard class="panel" :title="t('traffic.network')">
+    <!-- ── Traffic + Proxy distribution ── -->
+    <div class="middle-row">
+      <SectionCard class="panel traffic-panel" :title="t('traffic.network')">
         <template #extra>
           <span class="badge">{{ t('traffic.today') }}</span>
         </template>
         <TrafficSummary :traffic-in="trafficIn" :traffic-out="trafficOut"/>
       </SectionCard>
 
-      <SectionCard class="panel" :title="t('monitor.proxyDist')">
+      <SectionCard class="panel donut-panel" :title="t('monitor.proxyDist')">
         <DonutChart :slices="chartSlices"/>
       </SectionCard>
     </div>
 
+    <!-- ── Traffic history ── -->
     <SectionCard class="history-panel" :title="t('traffic.historyAll')">
       <template #extra>
         <div class="chart-toolbar">
-          <div class="range-toggle" role="group" :aria-label="t('traffic.chartType')">
-            <button
-                type="button"
-                class="range-btn"
-                :class="{ active: chartVariant === 'line' }"
-                @click="chartVariant = 'line'"
-            >
-              {{ t('traffic.chartLine') }}
-            </button>
-            <button
-                type="button"
-                class="range-btn"
-                :class="{ active: chartVariant === 'bar' }"
-                @click="chartVariant = 'bar'"
-            >
-              {{ t('traffic.chartBar') }}
-            </button>
+          <div class="seg" role="group" :aria-label="t('traffic.chartType')">
+            <button type="button" class="seg-btn" :class="{active: chartVariant==='line'}" @click="chartVariant='line'">{{ t('traffic.chartLine') }}</button>
+            <button type="button" class="seg-btn" :class="{active: chartVariant==='bar'}" @click="chartVariant='bar'">{{ t('traffic.chartBar') }}</button>
           </div>
-          <div class="range-toggle" role="group" :aria-label="t('traffic.range')">
-            <button
-                type="button"
-                class="range-btn"
-                :class="{ active: trafficRange === '24h' }"
-                @click="trafficRange = '24h'"
-            >
-              {{ t('traffic.range24h') }}
-            </button>
-            <button
-                type="button"
-                class="range-btn"
-                :class="{ active: trafficRange === '7d' }"
-                @click="trafficRange = '7d'"
-            >
-              {{ t('traffic.range7d') }}
-            </button>
+          <div class="seg" role="group" :aria-label="t('traffic.range')">
+            <button type="button" class="seg-btn" :class="{active: trafficRange==='24h'}" @click="trafficRange='24h'">{{ t('traffic.range24h') }}</button>
+            <button type="button" class="seg-btn" :class="{active: trafficRange==='7d'}" @click="trafficRange='7d'">{{ t('traffic.range7d') }}</button>
           </div>
         </div>
       </template>
       <TrafficChart :variant="chartVariant" :range="trafficRange" :refresh-ms="5000"/>
     </SectionCard>
 
+    <!-- ── Server config ── -->
     <SectionCard class="config-panel" :title="t('monitor.serverConfig')">
-      <DescList v-if="configFields.length" :items="descItems">
-        <template v-for="field in configFields" :key="field.key" #[field.key]>
-          <ConfigValue :type="field.type" :value="field.value"/>
-        </template>
-      </DescList>
-      <p v-else class="empty">{{ t('overview.emptyConfig') }}</p>
+      <div v-if="configFields.length" class="config-grid">
+        <div v-for="field in configFields" :key="field.key" class="config-row">
+          <span class="config-label">{{ field.label }}</span>
+          <span class="config-val"><ConfigValue :type="field.type" :value="field.value"/></span>
+        </div>
+      </div>
+      <p v-else class="empty-hint">{{ t('overview.emptyConfig') }}</p>
     </SectionCard>
   </div>
 </template>
@@ -251,44 +163,56 @@ const descItems = computed<DescItem[]>(() =>
 .monitor {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.1rem;
+  animation: page-in 0.35s ease both;
 }
 
-.stats {
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* KPI grid */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
   margin: 0;
 }
 
-.monitor-panels {
+/* Middle row */
+.middle-row {
   display: grid;
-  grid-template-columns: minmax(280px, 1.05fr) minmax(260px, 0.95fr);
+  grid-template-columns: minmax(280px, 1.1fr) minmax(240px, 0.9fr);
   gap: 1rem;
   align-items: stretch;
 }
 
-.panel {
-  height: 100%;
-}
+.panel { height: 100%; }
 
+/* Badge */
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: 0.18rem 0.55rem;
+  padding: 0.16rem 0.52rem;
   border-radius: 999px;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--accent-text);
   background: var(--accent-soft);
   border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  letter-spacing: 0.01em;
 }
 
+/* Chart toolbar */
 .chart-toolbar {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.45rem;
   justify-content: flex-end;
 }
 
-.range-toggle {
+.seg {
   display: inline-flex;
   padding: 2px;
   border-radius: 999px;
@@ -296,49 +220,88 @@ const descItems = computed<DescItem[]>(() =>
   border: 1px solid var(--line);
 }
 
-.range-btn {
+.seg-btn {
   border: 0;
   background: transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   font-weight: 600;
-  padding: 0.28rem 0.7rem;
+  padding: 0.26rem 0.65rem;
   border-radius: 999px;
   cursor: pointer;
+  transition: color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 
-.range-btn.active {
-  color: var(--accent-text);
-  background: var(--panel);
-  box-shadow: var(--shadow);
-}
-
-.range-btn:hover:not(.active) {
+.seg-btn.active {
   color: var(--text);
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
 
-.empty {
+.seg-btn:hover:not(.active) { color: var(--text); }
+
+/* Config grid — 2-column key/value pairs */
+.config-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+}
+
+.config-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.58rem 0.65rem;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  transition: background 0.15s;
+}
+
+.config-row:hover { background: color-mix(in srgb, var(--muted) 5%, transparent); }
+.config-row:last-child, .config-row:nth-last-child(2):nth-child(odd) { border-bottom: none; }
+
+.config-row:nth-child(odd) { border-right: 1px solid var(--line); }
+
+.config-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.config-val {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.empty-hint {
   margin: 0;
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.88rem;
+  text-align: center;
+  padding: 1.5rem 0;
 }
 
-@media (max-width: 1100px) {
-  .monitor-panels {
-    grid-template-columns: 1fr;
-  }
+/* Responsive */
+@media (max-width: 1200px) {
+  .kpi-grid { grid-template-columns: 1fr 1fr; }
 }
-
-@media (max-width: 720px) {
-  .stats {
-    grid-template-columns: 1fr 1fr;
-  }
+@media (max-width: 1000px) {
+  .middle-row { grid-template-columns: 1fr; }
 }
-
-@media (max-width: 560px) {
-  .stats {
-    grid-template-columns: 1fr;
-  }
+@media (max-width: 640px) {
+  .kpi-grid { grid-template-columns: 1fr 1fr; }
+  .config-grid { grid-template-columns: 1fr; }
+  .config-row:nth-child(odd) { border-right: none; }
+}
+@media (max-width: 400px) {
+  .kpi-grid { grid-template-columns: 1fr; }
 }
 </style>
