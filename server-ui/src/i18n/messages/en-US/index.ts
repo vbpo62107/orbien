@@ -35,6 +35,7 @@ const enUS: MessageSchema = {
         pagination: 'Pagination',
         prevPage: 'Previous page',
         nextPage: 'Next page',
+        back: 'Back',
     },
     login: {
         title: 'Welcome back',
@@ -145,7 +146,7 @@ const enUS: MessageSchema = {
         agoDays: '{n}d ago',
         kick: 'Force kick',
         kickConfirm: 'Confirm kick?',
-        kickFailed: 'Kick failed: {msg}',
+        kickFailed: 'Kick failed, please try again',
         back: 'Back to clients',
         detail: 'Client details',
         notFound: 'Client not found',

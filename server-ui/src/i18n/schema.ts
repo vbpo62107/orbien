@@ -33,6 +33,7 @@ export interface MessageSchema {
         pagination: string
         prevPage: string
         nextPage: string
+        back: string
     }
     login: {
         title: string
