@@ -15,27 +15,28 @@ pub async fn run(svc: Arc<Service>, cfg: WebServerConfig) -> Result<()> {
     let listener = TcpListener::bind(&addr).await?;
     tracing::info!(%addr, user = %cfg.user, "webServer dashboard listening");
 
-    // Build AuthState when rp_id / rp_origin are configured, otherwise
-    // fall back to legacy Basic-Auth-only mode.
-    let auth_state: Option<Arc<auth::AuthState>> =
-        if !cfg.webauthn_rp_id.is_empty() && !cfg.webauthn_origin.is_empty() {
-            match auth::AuthState::new(&cfg.webauthn_rp_id, &cfg.webauthn_origin) {
-                Ok(a) => {
-                    tracing::info!(
-                        rp_id = %cfg.webauthn_rp_id,
-                        "WebAuthn enabled"
-                    );
-                    Some(Arc::new(a))
-                }
-                Err(e) => {
-                    tracing::warn!("WebAuthn init failed, falling back to Basic Auth: {e}");
-                    None
-                }
+    // Build AuthState when both WebAuthn fields are populated.
+    // `cfg.webauthn_enabled()` returns true only when rp_id AND origin are
+    // non-empty, so a partial config is treated as "disabled".
+    let auth_state: Option<Arc<auth::AuthState>> = if cfg.webauthn_enabled() {
+        match auth::AuthState::new(&cfg.webauthn_rp_id, &cfg.webauthn_origin) {
+            Ok(a) => {
+                tracing::info!(
+                    rp_id = %cfg.webauthn_rp_id,
+                    origin = %cfg.webauthn_origin,
+                    "WebAuthn enabled"
+                );
+                Some(Arc::new(a))
             }
-        } else {
-            tracing::info!("WebAuthn not configured, using Basic Auth only");
-            None
-        };
+            Err(e) => {
+                tracing::warn!("WebAuthn init failed, falling back to Basic Auth: {e}");
+                None
+            }
+        }
+    } else {
+        tracing::info!("WebAuthn not configured, using Basic Auth only");
+        None
+    };
 
     let state = Arc::new(DashState {
         svc,
