@@ -121,6 +121,23 @@ impl Default for ServerTransportConfig {
     }
 }
 
+/// Dashboard web server configuration.
+///
+/// # WebAuthn fields
+/// `webauthn_rp_id` and `webauthn_origin` enable Passkey / WebAuthn login.
+/// Both must be set together; if either is empty the dashboard falls back to
+/// plain password authentication.
+///
+/// Example (TOML):
+/// ```toml
+/// [webServer]
+/// addr     = "0.0.0.0"
+/// port     = 7500
+/// user     = "admin"
+/// password = "secret"
+/// webauthnRpId     = "example.com"
+/// webauthnOrigin   = "https://example.com"
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WebServerConfig {
     #[serde(default)]
@@ -128,13 +145,34 @@ pub struct WebServerConfig {
 
     #[serde(default)]
     pub port: u16,
+
     #[serde(default)]
     pub user: String,
+
     #[serde(default)]
     pub password: String,
 
     #[serde(default, rename = "assetsDir", alias = "assets_dir")]
     pub assets_dir: String,
+
+    /// WebAuthn Relying Party ID — must match the domain the dashboard is
+    /// served from (e.g. `"example.com"`).  Leave empty to disable WebAuthn.
+    #[serde(
+        default,
+        rename = "webauthnRpId",
+        alias = "webauthn_rp_id"
+    )]
+    pub webauthn_rp_id: String,
+
+    /// WebAuthn origin — the full origin the browser uses to reach the
+    /// dashboard (e.g. `"https://example.com"` or `"http://localhost:7500"`).
+    /// Leave empty to disable WebAuthn.
+    #[serde(
+        default,
+        rename = "webauthnOrigin",
+        alias = "webauthn_origin"
+    )]
+    pub webauthn_origin: String,
 }
 
 impl WebServerConfig {
@@ -146,6 +184,12 @@ impl WebServerConfig {
 
     pub fn enabled(&self) -> bool {
         self.port > 0
+    }
+
+    /// Returns `true` when both WebAuthn fields are populated, meaning Passkey
+    /// login is available in addition to password-based login.
+    pub fn webauthn_enabled(&self) -> bool {
+        !self.webauthn_rp_id.trim().is_empty() && !self.webauthn_origin.trim().is_empty()
     }
 }
 
