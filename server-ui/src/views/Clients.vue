@@ -95,8 +95,9 @@ async function onKick(runId: string, evt: Event) {
   try {
     await kickClient(runId)
     await store.refresh()
-  } catch (e) {
-    window.alert(t('clients.kickFailed', {msg: e instanceof Error ? e.message : String(e)}))
+  } catch {
+    // Never expose raw error internals to the user — show a generic translated message.
+    window.alert(t('clients.kickFailed'))
   } finally {
     kicking.value = null
   }

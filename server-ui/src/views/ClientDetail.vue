@@ -47,8 +47,9 @@ async function onKick() {
     await kickClient(runId.value)
     await store.refresh()
     router.push({name: 'clients'})
-  } catch (e) {
-    window.alert(t('clients.kickFailed', {msg: e instanceof Error ? e.message : String(e)}))
+  } catch {
+    // Never expose raw error internals to the user — show a generic translated message.
+    window.alert(t('clients.kickFailed'))
   } finally {
     kicking.value = false
   }
