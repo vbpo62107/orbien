@@ -33,6 +33,28 @@ export interface MessageSchema {
         prevPage: string
         nextPage: string
     }
+    login: {
+        title: string
+        subtitle: string
+        tabPassword: string
+        tabFingerprint: string
+        username: string
+        usernamePh: string
+        password: string
+        passwordPh: string
+        submit: string
+        loading: string
+        registerFingerprint: string
+        registering: string
+        scanFingerprint: string
+        scanning: string
+        webAuthnHint: string
+        errorEmpty: string
+        errorEmptyUser: string
+        errorFailed: string
+        errorWebAuthn: string
+        errorRegister: string
+    }
     overview: {
         version: string
         clients: string

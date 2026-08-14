@@ -1,4 +1,4 @@
-import type {MessageSchema} from '../../schema'
+import type { MessageSchema } from '../../schema'
 
 const zhCN: MessageSchema = {
     app: {
@@ -34,6 +34,28 @@ const zhCN: MessageSchema = {
         pagination: '分页',
         prevPage: '上一页',
         nextPage: '下一页',
+    },
+    login: {
+        title: '欢迎回来',
+        subtitle: '登录 Orbien 管理面板',
+        tabPassword: '密码登录',
+        tabFingerprint: '通行密钥',
+        username: '用户名',
+        usernamePh: '请输入用户名',
+        password: '密码',
+        passwordPh: '请输入密码',
+        submit: '登录',
+        loading: '登录中…',
+        registerFingerprint: '注册通行密钥',
+        registering: '正在注册…',
+        scanFingerprint: '点击进行验证',
+        scanning: '验证中…',
+        webAuthnHint: '请按照设备提示完成指纹 / Face ID 验证',
+        errorEmpty: '请输入用户名和密码',
+        errorEmptyUser: '请先输入用户名再注册通行密钥',
+        errorFailed: '登录失败，请检查用户名和密码',
+        errorWebAuthn: '通行密钥认证失败，请重试',
+        errorRegister: '通行密钥注册失败，请重试',
     },
     overview: {
         version: '版本',

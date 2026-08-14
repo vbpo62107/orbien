@@ -1,4 +1,4 @@
-import type {MessageSchema} from '../../schema'
+import type { MessageSchema } from '../../schema'
 
 const enUS: MessageSchema = {
     app: {
@@ -34,6 +34,28 @@ const enUS: MessageSchema = {
         pagination: 'Pagination',
         prevPage: 'Previous page',
         nextPage: 'Next page',
+    },
+    login: {
+        title: 'Welcome back',
+        subtitle: 'Sign in to Orbien dashboard',
+        tabPassword: 'Password',
+        tabFingerprint: 'Passkey',
+        username: 'Username',
+        usernamePh: 'Enter username',
+        password: 'Password',
+        passwordPh: 'Enter password',
+        submit: 'Sign in',
+        loading: 'Signing in…',
+        registerFingerprint: 'Register passkey',
+        registering: 'Registering…',
+        scanFingerprint: 'Tap to authenticate',
+        scanning: 'Authenticating…',
+        webAuthnHint: 'Follow your device prompt to verify with fingerprint or Face ID',
+        errorEmpty: 'Please enter username and password',
+        errorEmptyUser: 'Please enter a username before registering a passkey',
+        errorFailed: 'Sign in failed — please check your credentials',
+        errorWebAuthn: 'Passkey authentication failed, please try again',
+        errorRegister: 'Passkey registration failed, please try again',
     },
     overview: {
         version: 'Version',
