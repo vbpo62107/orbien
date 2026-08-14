@@ -67,6 +67,7 @@ export interface MessageSchema {
         bindPort: string
         server: string
         emptyConfig: string
+        emptyProxies: string
     }
     monitor: {
         listen: string
@@ -134,6 +135,7 @@ export interface MessageSchema {
         filter: string
         filterAll: string
         filterEmpty: string
+        search: string
         uptimeSecs: string
         uptimeMins: string
         uptimeHours: string

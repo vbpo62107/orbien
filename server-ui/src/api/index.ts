@@ -1,5 +1,6 @@
 export {ApiError, isApiError} from './errors'
 export {
+    fetchAuthStatus,
     fetchSystemInfo,
     fetchClients,
     fetchClient,
@@ -8,4 +9,4 @@ export {
     fetchProxyTraffic,
     fetchSystemTraffic,
 } from './client'
-export type {ProxyListParams, TrafficRange} from './client'
+export type {AuthStatus, ProxyListParams, TrafficRange} from './client'

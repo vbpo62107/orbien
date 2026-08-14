@@ -69,6 +69,7 @@ const zhCN: MessageSchema = {
         bindPort: '绑定端口',
         server: '服务端',
         emptyConfig: '未配置',
+        emptyProxies: '暂无代理',
     },
     monitor: {
         listen: '监听与传输',
@@ -136,6 +137,7 @@ const zhCN: MessageSchema = {
         filter: '状态筛选',
         filterAll: '全部',
         filterEmpty: '当前状态下暂无客户端',
+        search: '搜索客户端…',
         uptimeSecs: '已连接 {n} 秒',
         uptimeMins: '已连接 {n} 分钟',
         uptimeHours: '已连接 {n} 小时',

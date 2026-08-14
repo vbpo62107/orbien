@@ -69,6 +69,7 @@ const enUS: MessageSchema = {
         bindPort: 'Bind Port',
         server: 'Server',
         emptyConfig: 'Not configured',
+        emptyProxies: 'No proxies',
     },
     monitor: {
         listen: 'Listen & transport',
@@ -136,6 +137,7 @@ const enUS: MessageSchema = {
         filter: 'Filter by status',
         filterAll: 'All',
         filterEmpty: 'No clients in this status',
+        search: 'Search clients…',
         uptimeSecs: 'Connected {n}s',
         uptimeMins: 'Connected {n}m',
         uptimeHours: 'Connected {n}h',

@@ -29,12 +29,16 @@ const canWebAuthn = computed(
   () => supported.value && auth.capabilities.webauthn,
 )
 
-/** Map error codes thrown by auth store / composables to i18n strings. */
+/** Map ALL error codes thrown by auth store / composables to i18n strings. Never show raw text. */
 function toUserMessage(e: unknown, fallbackKey: string): string {
   const msg = e instanceof Error ? e.message : ''
   if (msg === 'UNAUTHORIZED' || msg.startsWith('HTTP_')) return t('login.errorFailed')
-  if (msg === 'WEBAUTHN_FAILED')   return t('login.errorWebAuthn')
-  if (msg === 'REGISTER_FAILED')   return t('login.errorRegister')
+  if (msg === 'WEBAUTHN_NOT_SUPPORTED') return t('login.errorWebAuthn')
+  if (msg === 'WEBAUTHN_INIT_FAILED')   return t('login.errorWebAuthn')
+  if (msg === 'WEBAUTHN_FAILED')        return t('login.errorWebAuthn')
+  if (msg === 'REGISTER_INIT_FAILED')   return t('login.errorRegister')
+  if (msg === 'REGISTER_FAILED')        return t('login.errorRegister')
+  if (msg === 'UNEXPECTED_RESPONSE')    return t('login.errorFailed')
   // Unknown / unexpected — use the supplied fallback key (never show raw text)
   return t(fallbackKey as Parameters<typeof t>[0])
 }
