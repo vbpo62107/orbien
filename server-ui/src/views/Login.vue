@@ -29,6 +29,16 @@ const canWebAuthn = computed(
   () => supported.value && auth.capabilities.webauthn,
 )
 
+/** Map error codes thrown by auth store / composables to i18n strings. */
+function toUserMessage(e: unknown, fallbackKey: string): string {
+  const msg = e instanceof Error ? e.message : ''
+  if (msg === 'UNAUTHORIZED' || msg.startsWith('HTTP_')) return t('login.errorFailed')
+  if (msg === 'WEBAUTHN_FAILED')   return t('login.errorWebAuthn')
+  if (msg === 'REGISTER_FAILED')   return t('login.errorRegister')
+  // Unknown / unexpected — use the supplied fallback key (never show raw text)
+  return t(fallbackKey as Parameters<typeof t>[0])
+}
+
 async function loginPassword() {
   if (!username.value || !password.value) {
     error.value = t('login.errorEmpty')
@@ -40,7 +50,7 @@ async function loginPassword() {
     await auth.loginWithPassword(username.value, password.value)
     router.push('/')
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : t('login.errorFailed')
+    error.value = toUserMessage(e, 'login.errorFailed')
   } finally {
     loading.value = false
   }
@@ -57,7 +67,7 @@ async function loginFingerprint() {
       error.value = t('login.errorWebAuthn')
     }
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : t('login.errorWebAuthn')
+    error.value = toUserMessage(e, 'login.errorWebAuthn')
   }
 }
 
@@ -72,7 +82,7 @@ async function registerFingerprint() {
     error.value = ''
     mode.value = 'webauthn'
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : t('login.errorRegister')
+    error.value = toUserMessage(e, 'login.errorRegister')
   }
 }
 </script>
