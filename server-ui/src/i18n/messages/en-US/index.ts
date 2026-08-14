@@ -24,6 +24,7 @@ const enUS: MessageSchema = {
         expandSidebar: 'Expand menu',
         openMenu: 'Open menu',
         closeMenu: 'Close menu',
+        logout: 'Sign out',
     },
     common: {
         notConfigured: 'Not configured',

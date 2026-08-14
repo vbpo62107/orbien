@@ -22,6 +22,7 @@ export interface MessageSchema {
         expandSidebar: string
         openMenu: string
         closeMenu: string
+        logout: string
     }
     common: {
         notConfigured: string

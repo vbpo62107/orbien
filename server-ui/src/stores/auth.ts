@@ -31,8 +31,8 @@ export const useAuthStore = defineStore('auth', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: user, password: pass }),
     })
-    if (res.status === 401) throw new Error('用户名或密码错误')
-    if (!res.ok) throw new Error(`登录失败 (${res.status})`)
+    if (res.status === 401) throw new Error('UNAUTHORIZED')
+    if (!res.ok) throw new Error(`HTTP_${res.status}`)
     authenticated.value = true
     username.value = user
   }
@@ -41,7 +41,7 @@ export const useAuthStore = defineStore('auth', () => {
     await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {})
     authenticated.value = false
     username.value = ''
-    // Reset so the next login page load re-fetches.
+    // Reset so the next login page load re-fetches capabilities.
     capabilitiesLoaded.value = false
   }
 

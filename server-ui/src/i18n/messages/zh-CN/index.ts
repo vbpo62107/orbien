@@ -24,6 +24,7 @@ const zhCN: MessageSchema = {
         expandSidebar: '展开菜单',
         openMenu: '打开菜单',
         closeMenu: '关闭菜单',
+        logout: '退出登录',
     },
     common: {
         notConfigured: '未配置',
