@@ -7,12 +7,11 @@ use super::DashState;
 use crate::metrics::{ProxyTrafficHistory, TrafficWindow};
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode};
+use axum::http::{header, Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use base64::Engine;
 use orbien_core::VERSION;
 use rust_embed::Embed;
 use serde::Deserialize;
@@ -31,7 +30,10 @@ pub fn router(state: Arc<DashState>) -> Router {
         .route("/static", get(|| async { Redirect::permanent("/") }))
         .route("/static/", get(|| async { Redirect::permanent("/") }))
         .route("/static/{*path}", get(redirect_legacy_static))
-        // ── auth endpoints ────────────────────────────────────────────────────
+        // ── auth endpoints ───────────────────────────────────────────────────────────
+        // GET  /api/v1/auth/status — public; tells the SPA whether WebAuthn is
+        //      available so it can show/hide the passkey login button.
+        .route("/api/v1/auth/status", get(auth_routes::auth_status))
         .route("/api/v1/auth/login", post(auth_routes::login))
         .route("/api/v1/auth/logout", post(auth_routes::logout))
         .route(
@@ -50,7 +52,7 @@ pub fn router(state: Arc<DashState>) -> Router {
             "/api/v1/auth/webauthn/login/finish",
             post(auth_routes::webauthn_login_finish),
         )
-        // ── dashboard API ─────────────────────────────────────────────────────
+        // ── dashboard API ─────────────────────────────────────────────────────────
         .route("/api/v1/system/info", get(system_info))
         .route("/api/v1/system/traffic", get(system_traffic))
         .route("/api/v1/clients", get(list_clients))
@@ -71,55 +73,16 @@ async fn redirect_legacy_static(Path(path): Path<String>) -> Redirect {
     }
 }
 
-/// Legacy Basic-Auth middleware kept for compatibility with older clients that
-/// don't use the new session-cookie flow.  The new `auth_middleware` in
-/// `auth.rs` supersedes this for browser-based access.
+/// Kept as a named symbol so callers that still reference `routes::basic_auth`
+/// in tests compile cleanly.  In production the `auth_middleware` from
+/// `auth.rs` is the authoritative gate — this wrapper just delegates to it.
+#[allow(dead_code)]
 pub async fn basic_auth(
-    State(state): State<Arc<DashState>>,
+    state: axum::extract::State<Arc<DashState>>,
     req: Request<Body>,
     next: Next,
 ) -> Result<Response, Response> {
-    if !needs_auth(&state) {
-        return Ok(next.run(req).await);
-    }
-    if authorized(&state, req.headers()) {
-        return Ok(next.run(req).await);
-    }
-    let mut res = (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
-    res.headers_mut().insert(
-        header::WWW_AUTHENTICATE,
-        HeaderValue::from_static("Basic realm=\"Restricted\""),
-    );
-    Err(res)
-}
-
-fn needs_auth(state: &DashState) -> bool {
-    !state.cfg.user.is_empty() || !state.cfg.password.is_empty()
-}
-
-fn authorized(state: &DashState, headers: &HeaderMap) -> bool {
-    let Some(h) = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-    else {
-        return false;
-    };
-    let Some(b64) = h
-        .strip_prefix("Basic ")
-        .or_else(|| h.strip_prefix("basic "))
-    else {
-        return false;
-    };
-    let Ok(raw) = base64::engine::general_purpose::STANDARD.decode(b64.trim()) else {
-        return false;
-    };
-    let Ok(s) = String::from_utf8(raw) else {
-        return false;
-    };
-    let Some((u, p)) = s.split_once(':') else {
-        return false;
-    };
-    u == state.cfg.user && p == state.cfg.password
+    super::auth::auth_middleware(state, req, next).await
 }
 
 async fn index_html(State(state): State<Arc<DashState>>) -> Response {

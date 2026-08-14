@@ -41,6 +41,25 @@ fn get_auth(state: &DashState) -> Result<&AuthState, Response> {
         .ok_or_else(|| err(StatusCode::NOT_IMPLEMENTED, "webauthn not configured"))
 }
 
+// ── auth status (public) ───────────────────────────────────────────────────
+
+/// `GET /api/v1/auth/status` — always public (no auth required).
+///
+/// Returns a small JSON payload the SPA uses to decide which login methods
+/// to show.  Example response:
+/// ```json
+/// { "code": 200, "msg": "", "data": { "webauthn": true, "password": true } }
+/// ```
+pub async fn auth_status(State(state): State<Arc<DashState>>) -> Response {
+    let webauthn_available = state.auth.is_some();
+    let password_available = !state.cfg.user.is_empty();
+    ok(serde_json::json!({
+        "webauthn": webauthn_available,
+        "password": password_available,
+    }))
+    .into_response()
+}
+
 // ── password login ─────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -227,8 +246,6 @@ pub async fn webauthn_login_finish(
 
     match auth.webauthn.finish_passkey_authentication(&credential, &auth_state) {
         Ok(auth_result) => {
-            // Delegate counter update + username lookup to the AuthState method
-            // so we never touch `auth.passkeys` directly from a route handler.
             let username = auth
                 .apply_auth_result(&auth_result)
                 .unwrap_or_else(|| "admin".to_string());
@@ -254,6 +271,5 @@ pub async fn webauthn_login_finish(
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 fn uuid_for_name(name: &str) -> uuid::Uuid {
-    // Deterministic UUID v5 from the username so re-registration is idempotent
     uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, name.as_bytes())
 }
