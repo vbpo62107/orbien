@@ -38,7 +38,7 @@ fn get_auth(state: &DashState) -> Result<&AuthState, Response> {
     state
         .auth
         .as_deref()
-        .ok_or_else(|| err(StatusCode::NOT_IMPLEMENTED, "auth not configured"))
+        .ok_or_else(|| err(StatusCode::NOT_IMPLEMENTED, "webauthn not configured"))
 }
 
 // ── password login ─────────────────────────────────────────────────────────────
@@ -53,25 +53,23 @@ pub async fn login(
     State(state): State<Arc<DashState>>,
     Json(body): Json<LoginReq>,
 ) -> Response {
-    // Validate credentials against the server config
     let ok_creds = body.username == state.cfg.user && body.password == state.cfg.password;
     if !ok_creds {
         return err(StatusCode::UNAUTHORIZED, "invalid credentials");
     }
 
-    match get_auth(&state) {
-        Ok(auth) => {
-            let token = auth.create_session(&body.username);
-            let cookie = session_cookie(&token, false);
-            let mut res = ok(serde_json::json!({ "username": body.username })).into_response();
-            res.headers_mut().insert(header::SET_COOKIE, cookie);
-            res
-        }
-        Err(_) => {
-            // No AuthState → still return 200 so the SPA can function
-            ok(serde_json::json!({ "username": body.username })).into_response()
-        }
+    let mut res = ok(serde_json::json!({ "username": body.username })).into_response();
+
+    // Always issue a session cookie when AuthState is present; when running in
+    // Basic-Auth-only mode we still return 200 so the SPA works, but there is
+    // no stateful session to set a cookie for.
+    if let Some(auth) = &state.auth {
+        let token = auth.create_session(&body.username);
+        let cookie = session_cookie(&token, false);
+        res.headers_mut().insert(header::SET_COOKIE, cookie);
     }
+
+    res
 }
 
 // ── logout ────────────────────────────────────────────────────────────────────
@@ -80,7 +78,7 @@ pub async fn logout(
     State(state): State<Arc<DashState>>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    if let Ok(auth) = get_auth(&state) {
+    if let Some(auth) = &state.auth {
         if let Some(token) = super::auth::extract_cookie(&headers, "orbien_session") {
             auth.remove_session(&token);
         }
@@ -191,8 +189,6 @@ pub async fn webauthn_login_begin(
         }
     };
 
-    // Store under a short-lived token sent as a cookie so the finish handler
-    // can retrieve it even if multiple tabs race.
     let state_key = uuid::Uuid::new_v4().to_string();
     auth.save_auth_state(&state_key, auth_state);
 
@@ -231,22 +227,11 @@ pub async fn webauthn_login_finish(
 
     match auth.webauthn.finish_passkey_authentication(&credential, &auth_state) {
         Ok(auth_result) => {
-            // Update counter on the stored passkey
-            let mut matched_user = String::new();
-            for entry in auth.passkeys.iter_mut() {
-                for pk in entry.value_mut().iter_mut() {
-                    if auth_result.cred_id() == pk.cred_id() {
-                        pk.update_credential(&auth_result);
-                        matched_user = entry.key().clone();
-                    }
-                }
-            }
-
-            let username = if matched_user.is_empty() {
-                "admin".to_string()
-            } else {
-                matched_user
-            };
+            // Delegate counter update + username lookup to the AuthState method
+            // so we never touch `auth.passkeys` directly from a route handler.
+            let username = auth
+                .apply_auth_result(&auth_result)
+                .unwrap_or_else(|| "admin".to_string());
 
             let token = auth.create_session(&username);
             let cookie = session_cookie(&token, false);

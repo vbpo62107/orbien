@@ -27,8 +27,7 @@ use std::{
 };
 use webauthn_rs::{
     prelude::{
-        CreationChallengeResponse, PasskeyAuthentication, PasskeyRegistration,
-        PublicKeyCredential, RegisterPublicKeyCredential, RequestChallengeResponse,
+        PasskeyAuthentication, PasskeyRegistration,
     },
     Webauthn, WebauthnBuilder,
 };
@@ -44,8 +43,6 @@ struct Session {
 const SESSION_TTL: Duration = Duration::from_secs(8 * 3600); // 8 h
 const COOKIE_NAME: &str = "orbien_session";
 
-// ── persisted passkey storage (in-memory for single-node deploy) ──────────────
-
 use webauthn_rs::prelude::Passkey;
 
 // ── public AuthState shared via DashState ────────────────────────────────────
@@ -53,7 +50,7 @@ use webauthn_rs::prelude::Passkey;
 pub struct AuthState {
     /// token → session
     sessions: DashMap<String, Session>,
-    /// username → Vec<Passkey>
+    /// username → Vec<Passkey>  (private — access through methods only)
     passkeys: DashMap<String, Vec<Passkey>>,
     /// pending registration states keyed by username
     reg_states: DashMap<String, PasskeyRegistration>,
@@ -141,6 +138,24 @@ impl AuthState {
                 }
             }
         }
+    }
+
+    /// Update the counter for a just-authenticated credential and return the
+    /// username that owns it.  Returns `None` when the credential is not found
+    /// (should not happen in normal flow).
+    pub fn apply_auth_result(
+        &self,
+        auth_result: &webauthn_rs::prelude::AuthenticationResult,
+    ) -> Option<String> {
+        for mut entry in self.passkeys.iter_mut() {
+            for pk in entry.value_mut().iter_mut() {
+                if auth_result.cred_id() == pk.cred_id() {
+                    pk.update_credential(auth_result);
+                    return Some(entry.key().clone());
+                }
+            }
+        }
+        None
     }
 
     // ── pending state helpers ─────────────────────────────────────────────────
