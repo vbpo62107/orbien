@@ -32,7 +32,7 @@ orbien-core = { path = "core" }
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["io", "compat"] }
 futures = "0.3"
-yamux = "0.13"
+yamux = "0.14.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
@@ -48,7 +48,7 @@ base64 = "0.22"
 bytes = "1"
 async-trait = "0.1"
 quinn = "0.11"
-rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls = { version = "0.23.41", default-features = false, features = ["ring", "std"] }
 rustls-pki-types = "1"
 rustls-pemfile = "2"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
