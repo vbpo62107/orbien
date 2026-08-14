@@ -20,18 +20,23 @@ export const router = createRouter({
   ],
 })
 
-// Navigation guard — redirect to /login on 401 or unauthenticated
+/**
+ * Navigation guard.
+ *
+ * - Public routes (meta.public) always pass through.
+ * - If auth store already says authenticated, allow through immediately.
+ * - Otherwise call auth.fetchStatus() which hits /api/v1/auth/status
+ *   (same endpoint used by the rest of the app) instead of a raw fetch
+ *   against /api/v1/system/info, so the logic stays consistent.
+ */
 router.beforeEach(async (to) => {
   if (to.meta.public) return true
   const auth = useAuthStore()
-  // If already marked authenticated, allow through
   if (auth.authenticated) return true
-  // Probe the server to check if session cookie is valid
   try {
-    const res = await fetch('/api/v1/system/info', { credentials: 'include' })
-    if (res.status === 401) return { name: 'login' }
-    auth.setAuthenticated(true)
-    return true
+    const ok = await auth.fetchStatus()
+    if (ok) return true
+    return { name: 'login' }
   } catch {
     return { name: 'login' }
   }

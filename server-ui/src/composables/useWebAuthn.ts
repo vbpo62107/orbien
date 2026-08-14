@@ -9,6 +9,15 @@ import { ref } from 'vue'
  * The server wraps every response in { code, msg, data }.  Both the
  * challenge and the publicKey options are nested inside `.data.publicKey`
  * (the standard webauthn-rs JSON format), so we unwrap accordingly.
+ *
+ * Error codes thrown (never localised strings — Login.vue maps them via
+ * toUserMessage()):
+ *   WEBAUTHN_NOT_SUPPORTED  — browser has no PublicKeyCredential
+ *   REGISTER_INIT_FAILED    — begin endpoint returned non-2xx
+ *   REGISTER_FAILED         — finish endpoint returned non-2xx
+ *   WEBAUTHN_INIT_FAILED    — login/begin returned non-2xx
+ *   WEBAUTHN_FAILED         — login/finish returned non-2xx
+ *   UNEXPECTED_RESPONSE     — server body could not be unwrapped
  */
 export function useWebAuthn() {
   const supported = ref(
@@ -51,25 +60,22 @@ export function useWebAuthn() {
   function unwrapPublicKey(body: unknown): Record<string, unknown> {
     if (body && typeof body === 'object') {
       const b = body as Record<string, unknown>
-      // webauthn-rs returns data.publicKey
       if (b.data && typeof b.data === 'object') {
         const d = b.data as Record<string, unknown>
         if (d.publicKey && typeof d.publicKey === 'object') {
           return d.publicKey as Record<string, unknown>
         }
-        // fallback: data itself is the options
         return d
       }
-      // fallback: root is the options (old format / demo mode)
       return b
     }
-    throw new Error('意外的服务器响应格式')
+    throw new Error('UNEXPECTED_RESPONSE')
   }
 
   // ── registration ──────────────────────────────────────────────────────────
 
   async function register(username: string): Promise<void> {
-    if (!supported.value) throw new Error('此浏览器不支持 WebAuthn')
+    if (!supported.value) throw new Error('WEBAUTHN_NOT_SUPPORTED')
     registering.value = true
     try {
       const beginRes = await fetch('/api/v1/auth/webauthn/register/begin', {
@@ -78,7 +84,7 @@ export function useWebAuthn() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username }),
       })
-      if (!beginRes.ok) throw new Error('指纹注册初始化失败')
+      if (!beginRes.ok) throw new Error('REGISTER_INIT_FAILED')
 
       const options = unwrapPublicKey(await beginRes.json())
       decodeOptions(options)
@@ -105,7 +111,7 @@ export function useWebAuthn() {
           },
         }),
       })
-      if (!finishRes.ok) throw new Error('指纹注册失败，请重试')
+      if (!finishRes.ok) throw new Error('REGISTER_FAILED')
     } finally {
       registering.value = false
     }
@@ -114,14 +120,14 @@ export function useWebAuthn() {
   // ── authentication ────────────────────────────────────────────────────────
 
   async function authenticate(): Promise<boolean> {
-    if (!supported.value) throw new Error('此浏览器不支持 WebAuthn')
+    if (!supported.value) throw new Error('WEBAUTHN_NOT_SUPPORTED')
     authenticating.value = true
     try {
       const beginRes = await fetch('/api/v1/auth/webauthn/login/begin', {
         method: 'POST',
         credentials: 'include',
       })
-      if (!beginRes.ok) throw new Error('指纹认证初始化失败')
+      if (!beginRes.ok) throw new Error('WEBAUTHN_INIT_FAILED')
 
       const options = unwrapPublicKey(await beginRes.json())
       decodeOptions(options)
