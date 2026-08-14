@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useLocale } from '@/composables/useLocale'
@@ -17,7 +17,17 @@ const error = ref('')
 const loading = ref(false)
 const mode = ref<'password' | 'webauthn'>('password')
 
-const canWebAuthn = computed(() => supported.value)
+// Fetch server capabilities on mount so we know if WebAuthn is configured.
+onMounted(() => auth.loadCapabilities())
+
+/**
+ * Show the Passkey tab only when BOTH:
+ *   1. The browser supports WebAuthn (window.PublicKeyCredential)
+ *   2. The server has WebAuthn enabled (auth.capabilities.webauthn)
+ */
+const canWebAuthn = computed(
+  () => supported.value && auth.capabilities.webauthn,
+)
 
 async function loginPassword() {
   if (!username.value || !password.value) {
@@ -79,7 +89,7 @@ async function registerFingerprint() {
       <h1 class="login-title">{{ t('login.title') }}</h1>
       <p class="login-sub">{{ t('login.subtitle') }}</p>
 
-      <!-- Mode tabs -->
+      <!-- Mode tabs: only render the Passkey tab when the server says WebAuthn is on -->
       <div class="login-tabs" role="tablist">
         <button
           role="tab"
@@ -124,6 +134,7 @@ async function registerFingerprint() {
           {{ loading ? t('login.loading') : t('login.submit') }}
         </button>
 
+        <!-- Register passkey button — only shown when WebAuthn is available -->
         <button
           v-if="canWebAuthn"
           type="button"
@@ -139,7 +150,7 @@ async function registerFingerprint() {
         </button>
       </form>
 
-      <!-- WebAuthn form -->
+      <!-- WebAuthn / Passkey form -->
       <div v-else class="login-form">
         <div class="fingerprint-area">
           <button
@@ -153,7 +164,6 @@ async function registerFingerprint() {
               <circle cx="32" cy="32" r="28" stroke="currentColor" stroke-width="2" opacity="0.15"/>
               <circle cx="32" cy="32" r="20" stroke="currentColor" stroke-width="2" opacity="0.25"/>
               <circle cx="32" cy="32" r="12" stroke="currentColor" stroke-width="2" opacity="0.4"/>
-              <!-- fingerprint lines -->
               <path d="M22 32c0-5.5 4.5-10 10-10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
               <path d="M19 32c0-7.2 5.8-13 13-13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
               <path d="M25 32c0-3.9 3.1-7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -320,7 +330,6 @@ async function registerFingerprint() {
 .btn-ghost:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
 .btn-icon { width: 1rem; height: 1rem; stroke: currentColor; fill: none; stroke-width: 2; }
 
-/* Fingerprint area */
 .fingerprint-area {
   display: flex;
   justify-content: center;

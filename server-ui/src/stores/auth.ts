@@ -1,11 +1,23 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { fetchAuthStatus, type AuthStatus } from '@/api/client'
 
 export const useAuthStore = defineStore('auth', () => {
-  // Authenticated flag — survives SPA navigation but resets on hard reload
-  // (server uses HTTP-only session cookie as the real auth gate)
+  // Authenticated flag — survives SPA navigation but resets on hard reload.
+  // The server uses an HTTP-only session cookie as the real auth gate.
   const authenticated = ref(false)
   const username = ref('')
+
+  // Server-reported capabilities — loaded once on app start / login page mount.
+  const capabilities = ref<AuthStatus>({ webauthn: false, password: true })
+  const capabilitiesLoaded = ref(false)
+
+  /** Call once when the Login page is shown. */
+  async function loadCapabilities(): Promise<void> {
+    if (capabilitiesLoaded.value) return
+    capabilities.value = await fetchAuthStatus()
+    capabilitiesLoaded.value = true
+  }
 
   function setAuthenticated(val: boolean, user = '') {
     authenticated.value = val
@@ -29,7 +41,18 @@ export const useAuthStore = defineStore('auth', () => {
     await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {})
     authenticated.value = false
     username.value = ''
+    // Reset so the next login page load re-fetches.
+    capabilitiesLoaded.value = false
   }
 
-  return { authenticated, username, setAuthenticated, loginWithPassword, logout }
+  return {
+    authenticated,
+    username,
+    capabilities,
+    capabilitiesLoaded,
+    loadCapabilities,
+    setAuthenticated,
+    loginWithPassword,
+    logout,
+  }
 })

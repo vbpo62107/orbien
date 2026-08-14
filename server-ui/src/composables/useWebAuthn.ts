@@ -3,21 +3,21 @@ import { ref } from 'vue'
 /**
  * WebAuthn (Passkey / fingerprint) composable.
  *
- * Registration:  calls POST /api/v1/auth/webauthn/register/begin|finish
- * Authentication: calls POST /api/v1/auth/webauthn/login/begin|finish
+ * Registration:   POST /api/v1/auth/webauthn/register/begin|finish
+ * Authentication: POST /api/v1/auth/webauthn/login/begin|finish
  *
- * If the server endpoints are not yet implemented the composable still works
- * in "local demo" mode so the Login page renders correctly.
+ * The server wraps every response in { code, msg, data }.  Both the
+ * challenge and the publicKey options are nested inside `.data.publicKey`
+ * (the standard webauthn-rs JSON format), so we unwrap accordingly.
  */
 export function useWebAuthn() {
   const supported = ref(
-    typeof window !== 'undefined' &&
-    !!window.PublicKeyCredential,
+    typeof window !== 'undefined' && !!window.PublicKeyCredential,
   )
   const registering = ref(false)
   const authenticating = ref(false)
 
-  // ── helpers ────────────────────────────────────────────────────────────────
+  // ── base64url helpers ──────────────────────────────────────────────────────
 
   function b64ToBuffer(b64: string): ArrayBuffer {
     const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'))
@@ -31,13 +31,47 @@ export function useWebAuthn() {
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
   }
 
+  /** Recursively decode all base64url `id` / `challenge` / `user.id` fields. */
+  function decodeOptions(opts: Record<string, unknown>): void {
+    if (typeof opts.challenge === 'string') opts.challenge = b64ToBuffer(opts.challenge)
+    if (opts.user && typeof (opts.user as Record<string, unknown>).id === 'string') {
+      ;(opts.user as Record<string, unknown>).id = b64ToBuffer(
+        (opts.user as Record<string, unknown>).id as string,
+      )
+    }
+    for (const key of ['excludeCredentials', 'allowCredentials'] as const) {
+      const arr = opts[key]
+      if (Array.isArray(arr)) {
+        opts[key] = arr.map((c: { id: string; type: string }) => ({ ...c, id: b64ToBuffer(c.id) }))
+      }
+    }
+  }
+
+  /** Unwrap `{ code, msg, data: { publicKey: ... } }` → publicKey options object. */
+  function unwrapPublicKey(body: unknown): Record<string, unknown> {
+    if (body && typeof body === 'object') {
+      const b = body as Record<string, unknown>
+      // webauthn-rs returns data.publicKey
+      if (b.data && typeof b.data === 'object') {
+        const d = b.data as Record<string, unknown>
+        if (d.publicKey && typeof d.publicKey === 'object') {
+          return d.publicKey as Record<string, unknown>
+        }
+        // fallback: data itself is the options
+        return d
+      }
+      // fallback: root is the options (old format / demo mode)
+      return b
+    }
+    throw new Error('意外的服务器响应格式')
+  }
+
   // ── registration ──────────────────────────────────────────────────────────
 
   async function register(username: string): Promise<void> {
     if (!supported.value) throw new Error('此浏览器不支持 WebAuthn')
     registering.value = true
     try {
-      // 1. Get challenge from server
       const beginRes = await fetch('/api/v1/auth/webauthn/register/begin', {
         method: 'POST',
         credentials: 'include',
@@ -45,33 +79,29 @@ export function useWebAuthn() {
         body: JSON.stringify({ username }),
       })
       if (!beginRes.ok) throw new Error('指纹注册初始化失败')
-      const options = await beginRes.json()
 
-      // Decode base64url fields
-      options.challenge = b64ToBuffer(options.challenge)
-      options.user.id = b64ToBuffer(options.user.id)
-      if (options.excludeCredentials) {
-        options.excludeCredentials = options.excludeCredentials.map((c: { id: string; type: string }) => ({
-          ...c, id: b64ToBuffer(c.id),
-        }))
-      }
+      const options = unwrapPublicKey(await beginRes.json())
+      decodeOptions(options)
 
-      // 2. Create credential (triggers OS fingerprint/Face ID dialog)
-      const credential = await navigator.credentials.create({ publicKey: options }) as PublicKeyCredential
+      const credential = await navigator.credentials.create(
+        { publicKey: options as PublicKeyCredentialCreationOptions },
+      ) as PublicKeyCredential
       const response = credential.response as AuthenticatorAttestationResponse
 
-      // 3. Send result to server
       const finishRes = await fetch('/api/v1/auth/webauthn/register/finish', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: credential.id,
-          rawId: bufferToB64(credential.rawId),
-          type: credential.type,
-          response: {
-            attestationObject: bufferToB64(response.attestationObject),
-            clientDataJSON: bufferToB64(response.clientDataJSON),
+          username,
+          credential: {
+            id: credential.id,
+            rawId: bufferToB64(credential.rawId),
+            type: credential.type,
+            response: {
+              attestationObject: bufferToB64(response.attestationObject),
+              clientDataJSON: bufferToB64(response.clientDataJSON),
+            },
           },
         }),
       })
@@ -87,26 +117,20 @@ export function useWebAuthn() {
     if (!supported.value) throw new Error('此浏览器不支持 WebAuthn')
     authenticating.value = true
     try {
-      // 1. Get challenge
       const beginRes = await fetch('/api/v1/auth/webauthn/login/begin', {
         method: 'POST',
         credentials: 'include',
       })
       if (!beginRes.ok) throw new Error('指纹认证初始化失败')
-      const options = await beginRes.json()
 
-      options.challenge = b64ToBuffer(options.challenge)
-      if (options.allowCredentials) {
-        options.allowCredentials = options.allowCredentials.map((c: { id: string; type: string }) => ({
-          ...c, id: b64ToBuffer(c.id),
-        }))
-      }
+      const options = unwrapPublicKey(await beginRes.json())
+      decodeOptions(options)
 
-      // 2. Get assertion (triggers OS biometric dialog)
-      const credential = await navigator.credentials.get({ publicKey: options }) as PublicKeyCredential
+      const credential = await navigator.credentials.get(
+        { publicKey: options as PublicKeyCredentialRequestOptions },
+      ) as PublicKeyCredential
       const response = credential.response as AuthenticatorAssertionResponse
 
-      // 3. Verify on server
       const finishRes = await fetch('/api/v1/auth/webauthn/login/finish', {
         method: 'POST',
         credentials: 'include',
