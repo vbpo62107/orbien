@@ -45,3 +45,110 @@ jobs:
 
       - name: build release bins
         run: cargo build --release --locked -p orbien-server -p orbien-client
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbien-bins
+          path: |
+            target/release/orbien-server
+            target/release/orbien
+          retention-days: 1
+
+  e2e-tcp:
+    name: E2E – TCP tunnel
+    runs-on: ubuntu-latest
+    needs: check
+
+    steps:
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: orbien-bins
+          path: bins
+
+      - name: Make binaries executable
+        run: chmod +x bins/orbien-server bins/orbien
+
+      # ── 1. Write configs ──────────────────────────────────────────────
+      - name: Write server config
+        run: |
+          cat > orbien-server.toml <<'EOF'
+          bindAddr = "0.0.0.0"
+          bindPort = 9527
+          EOF
+
+      - name: Write client config
+        run: |
+          cat > orbien.toml <<'EOF'
+          serverAddr = "127.0.0.1"
+          serverPort = 9527
+
+          [[proxies]]
+          name       = "echo"
+          type       = "tcp"
+          localIP    = "127.0.0.1"
+          localPort  = 7000
+          remotePort = 16000
+          EOF
+
+      # ── 2. Start echo service (simulates an internal service) ─────────
+      - name: Start echo server on port 7000
+        run: ncat -lk 7000 -e /bin/cat &
+
+      # ── 3. Start orbien-server ────────────────────────────────────────
+      - name: Start orbien-server
+        run: |
+          bins/orbien-server -c orbien-server.toml > /tmp/server.log 2>&1 &
+          echo "SERVER_PID=$!" >> $GITHUB_ENV
+
+      - name: Wait for orbien-server to be ready
+        run: |
+          for i in $(seq 1 20); do
+            nc -z 127.0.0.1 9527 && echo "server ready" && exit 0
+            sleep 0.5
+          done
+          echo "orbien-server failed to start" && cat /tmp/server.log && exit 1
+
+      # ── 4. Start orbien-client ────────────────────────────────────────
+      - name: Start orbien-client
+        run: |
+          bins/orbien -c orbien.toml > /tmp/client.log 2>&1 &
+          echo "CLIENT_PID=$!" >> $GITHUB_ENV
+
+      - name: Wait for tunnel to be ready (port 16000)
+        run: |
+          for i in $(seq 1 30); do
+            nc -z 127.0.0.1 16000 && echo "tunnel ready" && exit 0
+            sleep 0.5
+          done
+          echo "tunnel failed to establish" \
+            && echo "=== server ===" && cat /tmp/server.log \
+            && echo "=== client ===" && cat /tmp/client.log \
+            && exit 1
+
+      # ── 5. Verify TCP tunnel ──────────────────────────────────────────
+      - name: Verify TCP data through tunnel
+        run: |
+          PAYLOAD="orbien-e2e-$(date +%s)"
+          RESPONSE=$(echo "$PAYLOAD" | nc -w 3 127.0.0.1 16000)
+          echo "Sent:     $PAYLOAD"
+          echo "Received: $RESPONSE"
+          if [ "$RESPONSE" = "$PAYLOAD" ]; then
+            echo "✅ TCP tunnel verified"
+          else
+            echo "❌ Response mismatch"
+            echo "=== server ===" && cat /tmp/server.log
+            echo "=== client ===" && cat /tmp/client.log
+            exit 1
+          fi
+
+      # ── 6. Cleanup & upload logs on failure ───────────────────────────
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: |
+            /tmp/server.log
+            /tmp/client.log
