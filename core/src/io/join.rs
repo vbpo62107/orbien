@@ -1,7 +1,9 @@
 use super::counting::{ByteCounter, CountingStream};
 use tokio::io::{copy_bidirectional_with_sizes, AsyncRead, AsyncWrite};
 
-const JOIN_BUF: usize = 256 * 1024;
+// Increased from 256KB to 512KB for better throughput on high-bandwidth links.
+// Each active connection uses 2 × JOIN_BUF bytes; scale down if memory is tight.
+const JOIN_BUF: usize = 512 * 1024;
 
 pub async fn join<A, B>(a: A, b: B) -> std::io::Result<(u64, u64)>
 where

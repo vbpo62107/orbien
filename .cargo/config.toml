@@ -1,0 +1,19 @@
+# Performance tuning: compile for the native CPU instruction set (AVX2, etc.).
+# WARNING: binaries built with this flag run only on CPUs of the same generation.
+# For distributable releases, change to target-cpu=x86-64-v3 (compatible with
+# most servers manufactured after 2013).
+#
+# This file is intentionally committed so CI runners and local builds both
+# benefit from the same optimisation flags.
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=native"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "target-cpu=native"]
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=native"]
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "target-cpu=native"]

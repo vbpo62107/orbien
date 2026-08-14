@@ -7,11 +7,18 @@ use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 
 const MAX_NUM_STREAMS: usize = 4096;
 
+// Max per-connection receive window capped at 64 MiB.
+// yamux 0.14 uses dynamic window scaling internally; an excessively large
+// static ceiling (the previous 1 GiB = 256 KiB × 4096) interfered with that
+// mechanism and wasted virtual memory. 64 MiB is ample for any realistic
+// single-connection workload while leaving room for the dynamic tuner.
+const MAX_CONNECTION_RECV_WINDOW: usize = 64 * 1024 * 1024;
+
 fn yamux_config() -> yamux::Config {
     let mut cfg = yamux::Config::default();
 
     cfg.set_max_num_streams(MAX_NUM_STREAMS);
-    cfg.set_max_connection_receive_window(Some(256 * 1024 * MAX_NUM_STREAMS));
+    cfg.set_max_connection_receive_window(Some(MAX_CONNECTION_RECV_WINDOW));
     cfg
 }
 
@@ -65,7 +72,6 @@ async fn drive_client(io: DynStream, mut open_rx: mpsc::Receiver<OpenReply>) {
             inbound = poll_fn(|cx| conn.poll_next_inbound(cx)) => {
                 match inbound {
                     Some(Ok(_stream)) => {
-
                         tracing::debug!("yamux client ignored unexpected inbound stream");
                     }
                     Some(Err(e)) => {
