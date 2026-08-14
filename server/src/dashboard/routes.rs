@@ -1,3 +1,4 @@
+use super::auth_routes;
 use super::model::{
     ApiResponse, ClientInfo, Page, ProxyInfo, ProxyTrafficPoint, ProxyTrafficResp, SystemConfig,
     SystemInfo, SystemStatus,
@@ -30,6 +31,26 @@ pub fn router(state: Arc<DashState>) -> Router {
         .route("/static", get(|| async { Redirect::permanent("/") }))
         .route("/static/", get(|| async { Redirect::permanent("/") }))
         .route("/static/{*path}", get(redirect_legacy_static))
+        // ── auth endpoints ────────────────────────────────────────────────────
+        .route("/api/v1/auth/login", post(auth_routes::login))
+        .route("/api/v1/auth/logout", post(auth_routes::logout))
+        .route(
+            "/api/v1/auth/webauthn/register/begin",
+            post(auth_routes::webauthn_register_begin),
+        )
+        .route(
+            "/api/v1/auth/webauthn/register/finish",
+            post(auth_routes::webauthn_register_finish),
+        )
+        .route(
+            "/api/v1/auth/webauthn/login/begin",
+            post(auth_routes::webauthn_login_begin),
+        )
+        .route(
+            "/api/v1/auth/webauthn/login/finish",
+            post(auth_routes::webauthn_login_finish),
+        )
+        // ── dashboard API ─────────────────────────────────────────────────────
         .route("/api/v1/system/info", get(system_info))
         .route("/api/v1/system/traffic", get(system_traffic))
         .route("/api/v1/clients", get(list_clients))
@@ -50,6 +71,9 @@ async fn redirect_legacy_static(Path(path): Path<String>) -> Redirect {
     }
 }
 
+/// Legacy Basic-Auth middleware kept for compatibility with older clients that
+/// don't use the new session-cookie flow.  The new `auth_middleware` in
+/// `auth.rs` supersedes this for browser-based access.
 pub async fn basic_auth(
     State(state): State<Arc<DashState>>,
     req: Request<Body>,
@@ -120,11 +144,9 @@ async fn static_file(State(state): State<Arc<DashState>>, Path(path): Path<Strin
     if let Some(bytes) = load_override(&state.cfg.assets_dir, rel) {
         return bytes_response(content_type(rel), bytes);
     }
-
     if let Some(res) = try_embedded(rel) {
         return res;
     }
-
     serve_asset("index.html")
 }
 
@@ -152,12 +174,8 @@ struct PageQuery {
     page_size: usize,
 }
 
-fn default_page() -> usize {
-    1
-}
-fn default_page_size() -> usize {
-    50
-}
+fn default_page() -> usize { 1 }
+fn default_page_size() -> usize { 50 }
 
 #[derive(Deserialize)]
 struct TrafficQuery {
@@ -177,11 +195,7 @@ fn traffic_resp(hist: ProxyTrafficHistory) -> ProxyTrafficResp {
         history: hist
             .history
             .into_iter()
-            .map(|p| ProxyTrafficPoint {
-                date: p.date,
-                traffic_in: p.traffic_in,
-                traffic_out: p.traffic_out,
-            })
+            .map(|p| ProxyTrafficPoint { date: p.date, traffic_in: p.traffic_in, traffic_out: p.traffic_out })
             .collect(),
     }
 }
@@ -236,15 +250,8 @@ async fn list_clients(
     let total = snap.clients.len();
     let start = (page - 1).saturating_mul(page_size);
     Json(ApiResponse::ok(Page {
-        total,
-        page,
-        page_size,
-        items: snap
-            .clients
-            .into_iter()
-            .skip(start)
-            .take(page_size)
-            .collect(),
+        total, page, page_size,
+        items: snap.clients.into_iter().skip(start).take(page_size).collect(),
     }))
 }
 
@@ -267,11 +274,7 @@ async fn kick_client(
     let run_id = urlencoding_decode(&run_id);
     match state.svc.kick_client(&run_id).await {
         Ok(()) => Json(ApiResponse::ok(())),
-        Err(e) => Json(ApiResponse {
-            code: 404,
-            msg: e.to_string(),
-            data: (),
-        }),
+        Err(e) => Json(ApiResponse { code: 404, msg: e.to_string(), data: () }),
     }
 }
 
@@ -305,9 +308,7 @@ async fn list_proxies(
     let total = filtered.len();
     let start = (page - 1).saturating_mul(page_size);
     Json(ApiResponse::ok(Page {
-        total,
-        page,
-        page_size,
+        total, page, page_size,
         items: filtered.into_iter().skip(start).take(page_size).collect(),
     }))
 }
@@ -340,14 +341,8 @@ fn percent_decode(input: &str) -> Option<String> {
                 out.push((h << 4) | l);
                 i += 3;
             }
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            c => {
-                out.push(c);
-                i += 1;
-            }
+            b'+' => { out.push(b' '); i += 1; }
+            c => { out.push(c); i += 1; }
         }
     }
     String::from_utf8(out).ok()
@@ -363,9 +358,7 @@ fn from_hex(b: u8) -> Option<u8> {
 }
 
 fn load_override(assets_dir: &str, rel: &str) -> Option<Vec<u8>> {
-    if assets_dir.trim().is_empty() {
-        return None;
-    }
+    if assets_dir.trim().is_empty() { return None; }
     let path = safe_join(FsPath::new(assets_dir), rel)?;
     std::fs::read(path).ok()
 }
@@ -383,25 +376,15 @@ fn safe_join(base: &FsPath, rel: &str) -> Option<PathBuf> {
 }
 
 fn content_type(path: &str) -> &'static str {
-    if path.ends_with(".js") || path.ends_with(".mjs") {
-        "application/javascript; charset=utf-8"
-    } else if path.ends_with(".css") {
-        "text/css; charset=utf-8"
-    } else if path.ends_with(".html") {
-        "text/html; charset=utf-8"
-    } else if path.ends_with(".svg") {
-        "image/svg+xml"
-    } else if path.ends_with(".png") {
-        "image/png"
-    } else if path.ends_with(".ico") {
-        "image/x-icon"
-    } else if path.ends_with(".woff2") {
-        "font/woff2"
-    } else if path.ends_with(".map") {
-        "application/json"
-    } else {
-        "application/octet-stream"
-    }
+    if path.ends_with(".js") || path.ends_with(".mjs") { "application/javascript; charset=utf-8" }
+    else if path.ends_with(".css")   { "text/css; charset=utf-8" }
+    else if path.ends_with(".html")  { "text/html; charset=utf-8" }
+    else if path.ends_with(".svg")   { "image/svg+xml" }
+    else if path.ends_with(".png")   { "image/png" }
+    else if path.ends_with(".ico")   { "image/x-icon" }
+    else if path.ends_with(".woff2") { "font/woff2" }
+    else if path.ends_with(".map")   { "application/json" }
+    else { "application/octet-stream" }
 }
 
 fn bytes_response(content_type: &'static str, body: Vec<u8>) -> Response {

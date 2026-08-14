@@ -27,3 +27,13 @@ base64 = { workspace = true }
 axum = { workspace = true }
 rust-embed = { workspace = true }
 chrono = { workspace = true }
+
+# ── auth additions ────────────────────────────────────────────────────────────
+# Session tokens stored in memory (DashMap is a concurrent HashMap)
+dashmap     = "6"
+# WebAuthn ceremony logic
+webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation"] }
+# Secure random token generation
+rand        = "0.8"
+# Argon2 password hashing for the password-login path
+argon2      = "0.5"
